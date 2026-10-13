@@ -8,14 +8,15 @@ from level_params import LevelParams
 class Player:
     """玩家：保存玩家的分数和状态，并负责整个游戏主循环"""
 
-    def __init__(self):
+    def __init__(self, account=None):
+        self.account = account
         self.level_no = 1     # 当前关卡号
         self.start_time = 0   # 游戏开始时间（毫秒）
         self.elpsed_time = 0  # 游戏总用时（毫秒）
         self.score = 0        # 总分
 
-    def play(self):
-        """开始游戏：依次进行三关"""
+    def start(self):
+        """开始游戏：依次进行三关，返回最终得分"""
         game = Game(self)
         self.start_time = self._now_millis()
 
@@ -28,7 +29,7 @@ class Player:
         print("====== 打字游戏开始 ======")
 
         for p in configs:
-            level = Level(p)  # 当前关卡的状态
+            level = Level(p)
 
             self.level_no = level.get_level_no()
             print("\n--- 第%d关 ---" % self.level_no)
@@ -52,6 +53,7 @@ class Player:
 
         self.elpsed_time = self._now_millis() - self.start_time
         game.print_result()
+        return self.score
 
     def _now_millis(self):
         """返回当前时间的毫秒数（整数）"""
