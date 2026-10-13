@@ -108,6 +108,15 @@ class UserManager:
         ).hex()
         return f"{salt}${pwd_hash}"
 
+    # 返回用户全服排名
+    def total_ranking(self, score):
+        counter = 0
+        for item in self.ht.items():
+            if (item[1].high_score > score):
+                counter += 1
+
+        return counter + 1
+
     def _verify(self, password, stored):
         salt, _ = stored.split('$')
         return self._hash_password(password, salt) == stored
@@ -172,6 +181,37 @@ class UserManager:
         for username, info in data.items():
             acc = Account.from_dict(username, info)
             self.ht.insert(username, acc)
+
+    #统计
+    def analyse(self, username):
+        acc = self.ht.get(username)
+        if acc is None:
+            return None
+
+        scores = [h['score'] for h in acc.history]
+        n = len(scores)
+        ordered = sorted(scores)
+
+        # 排除边界条件，若为新用户则无记录的情况
+        if n == 0:
+            return None
+
+        # 二分查找排位
+        left, right = 0, len(ordered)
+        while (left<right):
+            mid = (left+right) // 2
+            if ordered[mid] < acc.high_score:
+                left = mid+1
+            else:
+                right = mid
+
+        #返回总局数、最高分、最低分、平均分、全服排名
+        return {'total': n,
+                'max_score': max(scores),
+                'min_score': min(scores),
+                'avg_score': sum(scores)/n,
+                'rank': self.total_ranking(acc.high_score)
+                }
 
 
 # 控制台交互：登录 / 注册菜单
