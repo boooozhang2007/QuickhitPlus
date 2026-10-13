@@ -1,5 +1,6 @@
 from auth import UserManager, login_or_register
 from player import Player
+from infinite_game import infinite_game
 
 
 def main():
@@ -15,7 +16,15 @@ def main():
         # 2. 进入游戏循环：可以连续玩多局
         while True:
             print(f"\n欢迎，{account.username}！开始打字游戏吧。\n")
-            player = Player(account=account)
+            print("请你选择一个游戏模式：\n1. 闯关模式\n2.无限模式\n3. 退出游戏")
+            mode = input("请选择 (1/2/3): ").strip()
+            if mode == '1':
+                player = Player(account=account)
+            elif mode == '2':
+                player = infinite_game(account=account)
+            elif mode == '3':
+                print("再见！")
+                return
             final_score = player.start()
 
             # 3. 更新分数
