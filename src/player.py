@@ -49,7 +49,7 @@ class Player:
                 break
 
             if user_input == target and (t2 - t1) <= p.get_time_limit():
-                gained = p.get_base_score()
+                gained = p.get_base_score() + ((p.get_time_limit()- (t2 - t1))//1000 ) * 10
                 level.set_score(gained)
                 self.score += gained
                 print("正确! 本关得分:", gained)
