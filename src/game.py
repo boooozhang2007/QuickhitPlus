@@ -21,4 +21,5 @@ class Game:
         print("========== 结果 ==========")
         print("关卡:", self.player.get_level_no())
         print("总分:", self.player.get_score())
+        print("用时: %.2f秒" % (self.player.get_elpsed_time() / 1000))
         print("==========================")

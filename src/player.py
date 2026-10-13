@@ -1,3 +1,4 @@
+import threading
 import time
 
 from game import Game
@@ -39,8 +40,13 @@ class Player:
             print("请输入:", target)
 
             t1 = self._now_millis()
-            user_input = input()
+            # 在时限内读取玩家输入，超时返回 None
+            user_input = self._input_with_timeout(level.get_time_limit() / 1000)
             t2 = self._now_millis()
+
+            if user_input is None:
+                print("失败! 超时（限时 %d秒）" % (level.get_time_limit() // 1000))
+                break
 
             if user_input == target and (t2 - t1) <= p.get_time_limit():
                 gained = p.get_base_score()
@@ -54,6 +60,26 @@ class Player:
         self.elpsed_time = self._now_millis() - self.start_time
         game.print_result()
         return self.score
+
+    def _input_with_timeout(self, timeout_sec):
+        """在 timeout_sec 秒内读取一行输入；超时则返回 None"""
+        box = [None]
+
+        def _read():
+            try:
+                box[0] = input()
+            except EOFError:
+                box[0] = ""
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(timeout_sec)
+
+        if reader.is_alive():
+            # 超时：读取线程还卡在 input() 上，主线程先走
+            print()
+            return None
+        return box[0]
 
     def _now_millis(self):
         """返回当前时间的毫秒数（整数）"""
