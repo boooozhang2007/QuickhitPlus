@@ -36,7 +36,7 @@ def main():
             # 4. 一局结束后，询问下一步
             print("\n1. 再玩一局")
             print("2. 返回账号菜单")
-            print("3.我的统计")
+            print("3. 我的统计")
             print("0. 退出程序")
             choice = input("请选择 (0/1/2/3): ").strip()
 
@@ -49,13 +49,13 @@ def main():
                 if not info:
                     print("还没有游戏记录，先玩一局吧！")
                     continue
-                    
+
                 print(f'''
-                统计信息：
-                最高分：{info['max_score']}
-                最低分：{info['min_score']}
-                平均分：{info['avg_score']:.1f}
-                排名：{info['rank']}
+统计信息：
+最高分：{info['max_score']}
+最低分：{info['min_score']}
+平均分：{info['avg_score']:.1f}
+排名：{info['rank']}
                 ''')
             elif choice == '0':
                 print("再见！")
