@@ -10,7 +10,13 @@ USER_DATA_FILE = os.path.join(os.path.dirname(__file__), '..', 'users.json')
 
 # 哈希表（链地址法）
 class HashTable:
-    """链地址法解决冲突的哈希表，key 为字符串"""
+    """链地址法解决冲突的哈希表，key 为字符串
+
+    装填因子超过 LOAD_FACTOR_LIMIT 时会自动扩容并重新散列，
+    避免链表越挂越长、查找退化成顺序查找。
+    """
+
+    LOAD_FACTOR_LIMIT = 0.75   # 超过这个装填因子就扩容
 
     def __init__(self, capacity=101):
         self.capacity = capacity
@@ -24,15 +30,62 @@ class HashTable:
             h = (h * 31 + ord(ch)) % self.capacity
         return h
 
+    def _resize(self, new_capacity):
+        """扩容并重新散列
+
+        注意不能直接把旧 table 拼过去：取模的除数变了，
+        同一个 key 算出来的下标和原来不一样，必须逐个重新插入。
+        """
+        old_table = self.table
+        self.capacity = new_capacity
+        self.table = [[] for _ in range(new_capacity)]
+        self.size = 0                     # 重新插入时会重新累加
+
+        for bucket in old_table:
+            for k, v in bucket:
+                self.insert(k, v)
+
     def insert(self, key, value):
         idx = self._hash(key)
         bucket = self.table[idx]
+
+        # 先找有没有这个 key：更新已有 key 不会让 size 变大，不该触发扩容
         for i, (k, v) in enumerate(bucket):
             if k == key:
                 bucket[i] = (key, value)  # 更新
                 return
+
+        # 新 key 才会让 size 变大，这时才判断要不要扩容
+        if (self.size + 1) > self.capacity * self.LOAD_FACTOR_LIMIT:
+            self._resize(self._next_capacity())
+            idx = self._hash(key)         # 扩容后除数变了，下标要重算
+            bucket = self.table[idx]
+
         bucket.append((key, value))
         self.size += 1
+
+    def _next_capacity(self):
+        """找一个大约两倍大的质数作为新容量
+
+        容量取质数能让 key 分布更均匀，减少冲突。
+        """
+        candidate = self.capacity * 2 + 1
+        while not self._is_prime(candidate):
+            candidate += 2
+        return candidate
+
+    @staticmethod
+    def _is_prime(n):
+        if n < 2:
+            return False
+        if n % 2 == 0:
+            return n == 2
+        i = 3
+        while i * i <= n:
+            if n % i == 0:
+                return False
+            i += 2
+        return True
 
     def get(self, key):
         idx = self._hash(key)
