@@ -16,6 +16,7 @@ class infinite_game:
         self.elpsed_time = 0  # 游戏总用时（毫秒）
         self.score = 0        # 总分
         self.is_failed = 0 # 游戏是否失败，0表示未失败，1表示失败
+        self.Score_weight=1.0
         
 
 
@@ -54,7 +55,10 @@ class infinite_game:
                     break
 
                 if user_input == target and (t2 - t1) <= p.get_time_limit():
-                    gained = p.get_base_score() + ((p.get_time_limit()- (t2 - t1))//1000 ) * 10
+                    self.Score_weight=min(1.0,2**((10-self.level_no)/10))
+                    # 权重是 float，乘完会把分数变成小数；线段树的叶子下标必须是整数，
+                    # 所以这里就地取整，保证全程分数都是 int
+                    gained = int((p.get_base_score() + ((p.get_time_limit()- (t2 - t1))//1000 ) * 10)*self.Score_weight)
                     level.set_score(gained)
                     self.score += gained
                     print("正确! 本关得分:", gained)
