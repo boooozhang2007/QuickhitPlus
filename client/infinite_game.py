@@ -4,6 +4,7 @@ import time
 from game import Game
 from level import Level
 from level_params import LevelParams
+from stack import Stack
 
 
 class infinite_game:
@@ -21,12 +22,26 @@ class infinite_game:
 
 
 
+    MAX_UNDO = 3
+
     def start(self):
-        """开始游戏：游戏将持续进行，直到玩家失败，返回最终得分"""
+        """开始游戏：游戏将持续进行，直到玩家失败，返回最终得分
+
+        失败时可撤销（弹出栈顶快照）回到本关开头重试，
+        最多撤销 MAX_UNDO 次。
+        """
+        undo_stack = Stack()
+        undo_count = 0
+
+        print("====== 打字游戏开始 ======")
+        print("（失败时可撤销重试，最多 %d 次）" % self.MAX_UNDO)
+
         while(self.is_failed==0):
             game = Game(self)
             self.start_time = self._now_millis()
             self.level_no += 1
+
+            undo_stack.push({'score': self.score, 'level_no': self.level_no})
 
             configs = [
             LevelParams(self.level_no, min(2+self.level_no*2,14), max(10-self.level_no,5)*1000, min(100*self.level_no,500)),
@@ -45,19 +60,14 @@ class infinite_game:
                 print("请输入:", target)
 
                 t1 = self._now_millis()
-                # 在时限内读取玩家输入，超时返回 None
                 user_input = self._input_with_timeout(level.get_time_limit() / 1000)
                 t2 = self._now_millis()
 
                 if user_input is None:
                     self.is_failed = 1
                     print("失败! 超时（限时 %d秒）" % (level.get_time_limit() // 1000))
-                    break
-
-                if user_input == target and (t2 - t1) <= p.get_time_limit():
+                elif user_input == target and (t2 - t1) <= p.get_time_limit():
                     self.Score_weight=min(1.0,2**((10-self.level_no)/10))
-                    # 权重是 float，乘完会把分数变成小数；线段树的叶子下标必须是整数，
-                    # 所以这里就地取整，保证全程分数都是 int
                     gained = int((p.get_base_score() + ((p.get_time_limit()- (t2 - t1))//1000 ) * 10)*self.Score_weight)
                     level.set_score(gained)
                     self.score += gained
@@ -65,10 +75,21 @@ class infinite_game:
                 else:
                     self.is_failed = 1
                     print("失败!")
-                    break
 
             self.elpsed_time = self._now_millis() - self.start_time
             game.print_result()
+
+            if self.is_failed and undo_count < self.MAX_UNDO and not undo_stack.is_empty():
+                print("撤销机会剩余: %d 次" % (self.MAX_UNDO - undo_count))
+                choice = input("是否撤销重试？(y/n): ").strip().lower()
+                if choice == 'y':
+                    state = undo_stack.pop()
+                    self.score = state['score']
+                    self.level_no = state['level_no'] - 1
+                    self.is_failed = 0
+                    undo_count += 1
+                    print("已撤销，重新挑战本关！")
+
         return self.score
 
     def _input_with_timeout(self, timeout_sec):
