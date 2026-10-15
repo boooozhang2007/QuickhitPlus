@@ -133,7 +133,9 @@ class Server:
 
         with self.lock:
             old = self.online.get(acc.username)
-            if old is not None:            # 同账号重复登录，踢掉旧连接
+            # old is client：同一条连接重登（客户端「返回账号菜单」后会再登一次），
+            # 关它就等于关掉正在处理这条请求的 socket
+            if old is not None and old is not client:   # 同账号在别处登录，踢掉旧连接
                 try:
                     old.send({"type": "kicked", "msg": "你的账号在别处登录了"})
                 except OSError:
