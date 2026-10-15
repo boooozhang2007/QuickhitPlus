@@ -81,6 +81,7 @@ class Server:
             "online": self.do_online,
             "rank": self.do_rank,
             "match": self.do_match,
+            "cancel_match": self.do_cancel_match,
             "score": self.do_score,
         }
 
@@ -177,6 +178,12 @@ class Server:
                          "opponent": other.username,
                          "msg": f"匹配成功，对手是 {other.username}"})
 
+    def do_cancel_match(self, client, msg):
+        removed = self.dequeue(client)
+        # ok=False 一般是取消晚了：等待期间正好被别人配对走了
+        client.send({"type": "cancel_match_result", "ok": removed,
+                     "msg": "已取消匹配" if removed else "已不在匹配队列中"})
+
     def do_score(self, client, msg):
         if client.username is None:
             client.send({"type": "error", "msg": "请先登录"})
@@ -213,6 +220,14 @@ class Server:
             a = self.waiting.popleft()          # 出队 O(1)
             b = self.waiting.popleft()
             return (a, b)
+
+    def dequeue(self, client):
+        """取消匹配：把自己从等待队列里摘掉，返回是否真的在队列里"""
+        with self.lock:
+            if client not in self.waiting:
+                return False
+            self.waiting.remove(client)
+            return True
 
     def get_board(self, n=10):
         """实时排行榜：按最高分取前 n 名"""

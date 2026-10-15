@@ -145,6 +145,9 @@ class NetClient:
     def match(self):
         return self.request({"type": "match"}, "match_result")
 
+    def cancel_match(self):
+        return self.request({"type": "cancel_match"}, "cancel_match_result")
+
 
 if __name__ == "__main__":
     # 自测：需要先在本机把 server/server.py 跑起来

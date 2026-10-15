@@ -1,5 +1,6 @@
 import getpass
 import sys
+import threading
 
 from net import NetClient
 from player import Player
@@ -84,7 +85,11 @@ def show_online(net):
 
 
 def do_match(net, username):
-    """发起匹配：先等服务器确认入队，再等对手出现的推送"""
+    """发起匹配：先等服务器确认入队，再等对手出现的推送
+
+    等待期间敲回车可以取消。主线程短轮询消息、另开一个线程读输入，
+    否则主线程卡在 input() 上就收不到「匹配成功」的推送了。
+    """
     r = net.match()
     if r is None:
         print("匹配请求失败")
@@ -97,14 +102,44 @@ def do_match(net, username):
         return
 
     print(r["msg"])
-    # 入队成功，等别人来配；最多等 30 秒
-    push = net.poll(timeout=30)
-    if push is None:
-        print("等待超时，暂时没匹配到对手")
-    elif push.get("matched"):
-        print(push["msg"])
-    else:
+    print("（等待对手中，敲回车可取消匹配）")
+
+    typed = [None]
+
+    def _read():
+        try:
+            typed[0] = input()
+        except EOFError:
+            typed[0] = ""
+
+    threading.Thread(target=_read, daemon=True).start()
+
+    while True:
+        push = net.poll(timeout=0.2)
+        if push is None:
+            if typed[0] is not None:          # 敲了回车（直接回车也算）
+                cancel_match(net)
+                return
+            if not net.connected:
+                print("与服务器断开连接，匹配结束")
+                return
+            continue
+        if push.get("matched"):
+            print(push["msg"])
+            return
         print("收到未知消息:", push)
+
+
+def cancel_match(net):
+    """通知服务端把自己从队列里摘掉
+
+    不取消就回主菜单的话，人已经不在等着了，下次别人匹配却会把我们配给他。
+    """
+    r = net.cancel_match()
+    if r is None:
+        print("取消匹配失败（服务器无响应）")
+    else:
+        print(r["msg"])
 
 
 # ---------- 主流程 ----------
