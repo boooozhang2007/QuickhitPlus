@@ -213,7 +213,7 @@ def main():
                 if push and push.get("matched"):
                     print("提示：", push["msg"])
 
-                print("\n1. 再玩一局")
+                print("\n1. 返回游戏模式选择")
                 print("2. 返回账号菜单")
                 print("0. 退出程序")
                 choice = input("请选择 (0/1/2): ").strip()
@@ -222,6 +222,8 @@ def main():
                 elif choice == '0':
                     print("再见！")
                     return
+                elif choice != '1':
+                    print("无效选择，返回游戏模式选择")
                 # 其他情况（含直接回车）都当"再玩一局"
     finally:
         net.close()
