@@ -10,7 +10,6 @@ sys.path.insert(0, os.path.join(ROOT, "shared"))
 
 from protocol import send_msg, recv_msg
 from auth import UserManager
-from Stats import Leaderboard
 
 
 HOST = "0.0.0.0"   # 监听所有网卡
@@ -48,7 +47,6 @@ class Server:
         self.online = {}          # 用户名 -> Client，用哈希表做在线表
         self.waiting = deque()    # 等待匹配的 Client，FIFO 队列
         self.lock = threading.Lock()
-        self.leaderboard = Leaderboard(self.users)  # 值域线段树，O(log V) 排行
 
     # ---------- 启动 ----------
     def create_socket_server(self):
@@ -125,8 +123,6 @@ class Server:
         with self.users_lock:
             ok, text = self.users.register(msg.get("username", ""),
                                            msg.get("password", ""))
-            if ok:
-                self.leaderboard.add_player(msg.get("username", ""), 0)
         client.send({"type": "register_result", "ok": ok, "msg": text})
 
     def do_login(self, client, msg):
@@ -200,8 +196,7 @@ class Server:
             old_high = acc.high_score
             self.users.update_score(client.username, score)
             new_high = acc.high_score
-            self.leaderboard.update_player(client.username, old_high, new_high)
-            rank = self.leaderboard.my_rank(client.username)
+            rank = self.users.total_ranking(client.username)
 
         client.send({"type": "score_result", "ok": True, "score": score,
                      "high_score": new_high, "rank": rank})
@@ -249,15 +244,13 @@ class Server:
             return True
 
     def get_board(self, n=10):
-        """实时排行榜：用线段树 O(log V) 查第 K 名，替代全量排序"""
+        """实时排行榜：取所有玩家按最高分降序排列，返回前 N 名"""
         with self.users_lock:
-            top = self.leaderboard.top_n(n)
+            top = self.users.top_players(n)
         board = []
-        rank = 1
-        for score, names in top:
-            for name in names:
-                board.append({"username": name, "high_score": score, "rank": rank})
-            rank += len(names)
+        for i, item in enumerate(top, 1):
+            board.append({"username": item["username"],
+                          "high_score": item["high_score"], "rank": i})
         return board
 
     # ---------- 广播 ----------
