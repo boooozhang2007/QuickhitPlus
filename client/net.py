@@ -148,6 +148,9 @@ class NetClient:
     def cancel_match(self):
         return self.request({"type": "cancel_match"}, "cancel_match_result")
 
+    def analyse(self):
+        return self.request({"type": "analyse"}, "analyse_result")
+
 
 if __name__ == "__main__":
     # 自测：需要先在本机把 server/server.py 跑起来

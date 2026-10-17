@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(ROOT, "shared"))
 
 from protocol import send_msg, recv_msg
 from auth import UserManager
+from Stats import Leaderboard
 
 
 HOST = "0.0.0.0"   # 监听所有网卡
@@ -47,6 +48,7 @@ class Server:
         self.online = {}          # 用户名 -> Client，用哈希表做在线表
         self.waiting = deque()    # 等待匹配的 Client，FIFO 队列
         self.lock = threading.Lock()
+        self.leaderboard = Leaderboard(self.users)  # 值域线段树，O(log V) 排行
 
     # ---------- 启动 ----------
     def create_socket_server(self):
@@ -83,6 +85,7 @@ class Server:
             "match": self.do_match,
             "cancel_match": self.do_cancel_match,
             "score": self.do_score,
+            "analyse": self.do_analyse,
         }
 
         try:
@@ -122,6 +125,8 @@ class Server:
         with self.users_lock:
             ok, text = self.users.register(msg.get("username", ""),
                                            msg.get("password", ""))
+            if ok:
+                self.leaderboard.add_player(msg.get("username", ""), 0)
         client.send({"type": "register_result", "ok": ok, "msg": text})
 
     def do_login(self, client, msg):
@@ -191,12 +196,26 @@ class Server:
 
         score = int(msg.get("score", 0))
         with self.users_lock:
-            self.users.update_score(client.username, score)   # 分数落盘
             acc = self.users.ht.get(client.username)
-            rank = self.users.total_ranking(acc.high_score)
+            old_high = acc.high_score
+            self.users.update_score(client.username, score)
+            new_high = acc.high_score
+            self.leaderboard.update_player(client.username, old_high, new_high)
+            rank = self.leaderboard.my_rank(client.username)
 
         client.send({"type": "score_result", "ok": True, "score": score,
-                     "high_score": acc.high_score, "rank": rank})
+                     "high_score": new_high, "rank": rank})
+
+    def do_analyse(self, client, msg):
+        if client.username is None:
+            client.send({"type": "error", "msg": "请先登录"})
+            return
+        with self.users_lock:
+            stats = self.users.analyse(client.username)
+        if stats is None:
+            client.send({"type": "analyse_result", "ok": False, "msg": "暂无游戏记录"})
+        else:
+            client.send({"type": "analyse_result", "ok": True, **stats})
 
     # ---------- 三个数据结构功能 ----------
     def online_people(self):
@@ -230,13 +249,16 @@ class Server:
             return True
 
     def get_board(self, n=10):
-        """实时排行榜：按最高分取前 n 名"""
+        """实时排行榜：用线段树 O(log V) 查第 K 名，替代全量排序"""
         with self.users_lock:
-            players = self.users.top_players(n)
-        return [{"username": acc.username,
-                 "high_score": acc.high_score,
-                 "rank": i}
-                for i, acc in enumerate(players, 1)]
+            top = self.leaderboard.top_n(n)
+        board = []
+        rank = 1
+        for score, names in top:
+            for name in names:
+                board.append({"username": name, "high_score": score, "rank": rank})
+            rank += len(names)
+        return board
 
     # ---------- 广播 ----------
     def broadcast_online_count(self):

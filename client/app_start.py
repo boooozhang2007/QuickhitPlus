@@ -84,6 +84,22 @@ def show_online(net):
     print(f"\n当前在线 {r['count']} 人：{', '.join(r['users']) or '（无）'}")
 
 
+def show_analyse(net, username):
+    r = net.analyse()
+    if r is None:
+        print("获取统计信息失败（服务器无响应）")
+        return
+    if not r["ok"]:
+        print(r.get("msg", "暂无游戏记录"))
+        return
+    print(f"\n--- {username} 的个人统计 ---")
+    print(f"总局数: {r['total']}")
+    print(f"最高分: {r['max_score']}")
+    print(f"最低分: {r['min_score']}")
+    print(f"平均分: {r['avg_score']:.1f}")
+    print(f"全服排名: 第 {r['rank']} 名")
+
+
 def do_match(net, username):
     """发起匹配：先等服务器确认入队，再等对手出现的推送
 
@@ -173,8 +189,9 @@ def main():
                 print("3. 查看在线玩家")
                 print("4. 查看排行榜")
                 print("5. 匹配对战")
-                print("6. 退出游戏")
-                mode = input("请选择 (1/2/3/4/5/6): ").strip()
+                print("6. 个人统计")
+                print("7. 退出游戏")
+                mode = input("请选择 (1/2/3/4/5/6/7): ").strip()
 
                 if mode == '1':
                     player = Player(account=username)
@@ -190,6 +207,9 @@ def main():
                     do_match(net, username)
                     continue
                 elif mode == '6':
+                    show_analyse(net, username)
+                    continue
+                elif mode == '7':
                     print("再见！")
                     return
                 else:

@@ -13,10 +13,6 @@
 大小)），不必上动态开点 / 坐标压缩。
 """
 
-# 值域上界 = 游戏理论最高分（约 12263），取 2^14 - 1 留余量。
-#
-# 注意是 16383 而不是 16384：size 必须「严格大于 max_score」才会取到 2^14，
-# 写成 16384 会让 size 翻到 32768，内存凭空多一倍。
 MAX_SCORE = 16383
 
 
@@ -32,12 +28,10 @@ class ScoreSegmentTree:
         self.max_score = int(max_score)
 
         size = 1
-        while size <= self.max_score:   # 严格大于：叶子 s+size 要落在 [size, 2*size)
+        while size <= self.max_score:
             size *= 2
         self.size = size
         self.tree = [0] * (2 * size)
-
-    # ---------------- 对外 ----------------
 
     def add(self, score, delta=1):
         """点修改：把分数 score 的玩家数加上 delta（delta 可为负）—— O(log V)"""
@@ -47,10 +41,10 @@ class ScoreSegmentTree:
                 '若来自旧数据请清洗 users.json，若公式已改请同步 MAX_SCORE'
                 % (score, self.max_score))
 
-        i = score + self.size           # 分数 -> 叶子下标
-        self.tree[i] += delta           # 先改叶子
+        i = score + self.size
+        self.tree[i] += delta
         i //= 2
-        while i:                        # 再顺祖先链向上重算（根是 1，1//2 == 0 时停）
+        while i:
             self.tree[i] = self.tree[2 * i] + self.tree[2 * i + 1]
             i //= 2
 
@@ -63,15 +57,14 @@ class ScoreSegmentTree:
         if hi < lo:
             return 0
 
-        # 标准区间分解：闭区间转半开 [lo, hi+1)，左右指针一起向根爬
         l = lo + self.size
         r = hi + 1 + self.size
         total = 0
         while l < r:
-            if l & 1:                   # l 是右孩子 → 它整个在区间内，计入后跳过
+            if l & 1:
                 total += self.tree[l]
                 l += 1
-            if r & 1:                   # r 是右孩子 → 它的左兄弟整个在区间内
+            if r & 1:
                 r -= 1
                 total += self.tree[r]
             l //= 2
@@ -87,21 +80,17 @@ class ScoreSegmentTree:
         return self.count_greater(score) + 1
 
     def kth_largest(self, k):
-        """第 k 名的分数（k = 1 即最高分）；越界返回 None —— O(log V)
-
-        从根往下走：先看右子树（高分侧）的人够不够 k 个，
-        够就往右，不够就扣掉右子树的人往左。全程不需要排序。
-        """
+        """第 k 名的分数（k = 1 即最高分）；越界返回 None —— O(log V)"""
         if k < 1 or k > self.tree[1]:
             return None
         i = 1
-        while i < self.size:            # 下标 >= size 就是叶子
+        while i < self.size:
             right = 2 * i + 1
             if self.tree[right] >= k:
-                i = right               # 第 k 名落在高分侧
+                i = right
             else:
                 k -= self.tree[right]
-                i = 2 * i               # 落在低分侧
+                i = 2 * i
         return i - self.size
 
     def total(self):
@@ -118,15 +107,12 @@ class Leaderboard:
     def __init__(self, user_manager, max_score=MAX_SCORE):
         self.um = user_manager
         self.max_score = max_score
-        self.by_score = {}                  # 分数 -> 该分数的用户名列表（同分合并用）
+        self.by_score = {}
         self.tree = ScoreSegmentTree(max_score)
         self.rebuild()
 
     def rebuild(self):
-        """从 UserManager 现有账号整棵重建
-
-        这是个安全阀：万一和 UserManager 不同步了，重跑一次即可对齐。
-        """
+        """从 UserManager 现有账号整棵重建"""
         self.by_score = {}
         self.tree = ScoreSegmentTree(self.max_score)
         for username, acc in self.um.ht.items():
@@ -134,11 +120,13 @@ class Leaderboard:
             self.by_score.setdefault(acc.high_score, []).append(username)
         return self.tree.total()
 
-    def update_player(self, username, old_high, new_high):
-        """某个玩家的最高分变了 —— 两次点修改，O(log V)
+    def add_player(self, username, score):
+        """新用户注册时加入线段树"""
+        self.tree.add(score, 1)
+        self.by_score.setdefault(score, []).append(username)
 
-        这就是「线段树存在的理由」在代码里的样子：改一个点，不用重算其他所有数据。
-        """
+    def update_player(self, username, old_high, new_high):
+        """某个玩家的最高分变了 —— 两次点修改，O(log V)"""
         if old_high == new_high:
             return
         self.tree.add(old_high, -1)
@@ -177,7 +165,6 @@ class Leaderboard:
         top = self.tree.kth_largest(1)
         if top is None:
             return []
-        # 分数只有 0 时 top+1 == 1，正好退化成一段，不会多出一个恒为 0 的空段
         buckets = max(1, min(buckets, top + 1))
 
         rows = []
@@ -188,10 +175,7 @@ class Leaderboard:
         return rows
 
     def top_n(self, n=10):
-        """前 n 名，返回 [(分数, [同分的用户名...]), ...]，按分数降序
-
-        分数来自 kth_largest 的树上二分，不是排序——同分的人合并成一条。
-        """
+        """前 n 名，返回 [(分数, [同分的用户名...]), ...]，按分数降序"""
         result = []
         k = 1
         total = self.tree.total()
@@ -199,18 +183,15 @@ class Leaderboard:
             score = self.tree.kth_largest(k)
             names = self.by_score.get(score, [])
             result.append((score, sorted(names)))
-            k += max(len(names), 1)     # 跳过所有同分的人；max 是防空转兜底
+            k += max(len(names), 1)
         return result
 
 
-BAR_CHAR = '█'     # █ 实心方块，控制台直方图的条形
+BAR_CHAR = '█'
 
 
 def render_histogram(rows, bar_width=36):
-    """把 distribution() 的结果渲染成控制台文本直方图
-
-    规则：条形从 0 起算（不截断基线）、按分数升序排列、每条直接标出人数。
-    """
+    """把 distribution() 的结果渲染成控制台文本直方图"""
     if not rows:
         return []
     peak = max([c for _, _, c in rows] + [1])
@@ -220,7 +201,7 @@ def render_histogram(rows, bar_width=36):
         label = '%6d' % lo if lo == hi else '%5d-%d' % (lo, hi)
         filled = int(round(count / peak * bar_width))
         if count and filled == 0:
-            filled = 1                  # 有 1 个人也要看得见，不能画成 0
+            filled = 1
         bar = BAR_CHAR * filled
         lines.append('%s |%-*s %d' % (label, bar_width, bar, count))
     return lines
