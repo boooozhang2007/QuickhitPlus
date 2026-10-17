@@ -193,10 +193,9 @@ class Server:
         score = int(msg.get("score", 0))
         with self.users_lock:
             acc = self.users.ht.get(client.username)
-            old_high = acc.high_score
             self.users.update_score(client.username, score)
             new_high = acc.high_score
-            rank = self.users.total_ranking(client.username)
+            rank = self.users.total_ranking(new_high)
 
         client.send({"type": "score_result", "ok": True, "score": score,
                      "high_score": new_high, "rank": rank})
@@ -248,9 +247,9 @@ class Server:
         with self.users_lock:
             top = self.users.top_players(n)
         board = []
-        for i, item in enumerate(top, 1):
-            board.append({"username": item["username"],
-                          "high_score": item["high_score"], "rank": i})
+        for i, acc in enumerate(top, 1):
+            board.append({"username": acc.username,
+                          "high_score": acc.high_score, "rank": i})
         return board
 
     # ---------- 广播 ----------
