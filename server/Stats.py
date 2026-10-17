@@ -1,10 +1,7 @@
 """值域线段树 + 基于 users.json 的分数统计脚本
 
-支持任意分数段的人数查询，以及按固定粒度（默认每 1000 分）的分段分布。
-
-选线段树而不是排序数组 / 前缀和，是因为分数会变（破纪录时 high_score 更新）：
-点修改 O(log V)，前缀和要 O(V) 重算。值域有界（无限模式得分收敛）才用得起静态数组。
-
+支持任意分数段的人数查询，以及每 BUCKET 分一段的分布。
+值域有界（无限模式得分收敛），所以可以用静态数组存线段树。
 脚本只读 users.json，不依赖 auth 的哈希表。
 用法：python Stats.py
 """
@@ -19,62 +16,56 @@ BUCKET = 1000     # 分段统计的粒度
 
 
 class ScoreSegmentTree:
-    """值域线段树：横轴是「分数」，叶子存该分数的玩家数
+    """值域线段树：叶子是单个分数，节点存区间内的人数，tree[1] 是总人数
 
-    内部用自底向上的完全二叉树（不用递归，省掉函数调用开销）：
-        tree[i]  节点 i 覆盖的分数区间内的玩家总数，tree[1] 即总人数
-        size     2 的幂且 > max_score，叶子 s 存放在 tree[s + size]
+    分数 s 的叶子下标是 s + size，所以递归查询只需在 [0, size-1] 上讨论。
     """
 
     def __init__(self, max_score=MAX_SCORE):
-        self.max_score = int(max_score)
+        self.max_score = max_score
 
+        # 叶子要放 0 ~ max_score，所以区间长度取大于 max_score 的 2 的幂
         size = 1
-        while size <= self.max_score:
+        while size <= max_score:
             size *= 2
         self.size = size
         self.tree = [0] * (2 * size)
 
-    def add(self, score, delta=1):
-        """点修改：把分数 score 的玩家数加上 delta（delta 可为负）—— O(log V)"""
-        if not isinstance(score, int) or not 0 <= score <= self.max_score:
-            raise ValueError(
-                '分数 %r 必须是 [0, %d] 内的整数；'
-                '若来自旧数据请清洗 users.json，若公式已改请同步 MAX_SCORE'
-                % (score, self.max_score))
+    def add(self, score):
+        """score 这个分数的玩家数加 1"""
+        score = int(score)
+        if not 0 <= score <= self.max_score:
+            raise ValueError("分数超出范围: %r" % score)
 
+        # 从叶子往根走，路径上每个节点都 +1
         i = score + self.size
-        self.tree[i] += delta
-        i //= 2
         while i:
-            self.tree[i] = self.tree[2 * i] + self.tree[2 * i + 1]
+            self.tree[i] += 1
             i //= 2
 
     def count_between(self, lo, hi):
-        """分数落在闭区间 [lo, hi] 里的玩家数 —— O(log V)"""
-        if hi < lo:
-            return 0
+        """分数在闭区间 [lo, hi] 内的玩家数"""
+        # 用户可能输入 -100 或超过 max_score 的分数，先裁到值域内
         lo = max(lo, 0)
         hi = min(hi, self.max_score)
-        if hi < lo:
+        if lo > hi:
             return 0
+        return self._count(1, 0, self.size - 1, lo, hi)
 
-        l = lo + self.size
-        r = hi + 1 + self.size
-        total = 0
-        while l < r:
-            if l & 1:
-                total += self.tree[l]
-                l += 1
-            if r & 1:
-                r -= 1
-                total += self.tree[r]
-            l //= 2
-            r //= 2
-        return total
+    def _count(self, node, left, right, lo, hi):
+        """node 管着 [left, right]，返回它和 [lo, hi] 重叠部分的玩家数"""
+        if hi < left or right < lo:          # 完全没重叠
+            return 0
+        if lo <= left and right <= hi:       # 完全在查询范围内，直接用整段
+            return self.tree[node]
+
+        # 只有部分重叠：从中间切开，左右孩子分别继续找
+        mid = (left + right) // 2
+        return (self._count(2 * node, left, mid, lo, hi)
+                + self._count(2 * node + 1, mid + 1, right, lo, hi))
 
     def total(self):
-        """树里的玩家总数 —— O(1)"""
+        """玩家总数"""
         return self.tree[1]
 
 
@@ -84,12 +75,13 @@ def build():
     with open(USER_DATA_FILE, encoding='utf-8') as f:
         data = json.load(f)
 
-    top_score = max((info.get('high_score', 0) for info in data.values()),
-                    default=0)
-    # 值域至少覆盖现存最高分，旧数据超出 MAX_SCORE 也不会让建树失败
-    tree = ScoreSegmentTree(max(MAX_SCORE, top_score))
-    for info in data.values():
-        tree.add(info.get('high_score', 0))
+    # 每个玩家只贡献一个最高分，和排行榜的统计口径一致
+    scores = [info.get('high_score', 0) for info in data.values()]
+
+    # 值域至少覆盖现存最高分，旧数据超出 MAX_SCORE 时也能建树；default=0 兜住空文件
+    tree = ScoreSegmentTree(max(MAX_SCORE, max(scores, default=0)))
+    for score in scores:
+        tree.add(score)
     return tree
 
 
@@ -110,18 +102,18 @@ def show_buckets(tree):
         print("暂无玩家记录")
         return
 
+    # 先把每个分段都算出来，再去掉末尾没人、只会刷屏的空段
     rows = []
     lo = 0
     while lo <= tree.max_score:
         hi = min(lo + BUCKET - 1, tree.max_score)
         rows.append((lo, hi, tree.count_between(lo, hi)))
         lo += BUCKET
-
-    # 只列到最后一个有人的分段，否则默认值域会多刷十几行空分段
-    last = max(i for i, (_, _, cnt) in enumerate(rows) if cnt > 0)
+    while rows and rows[-1][2] == 0:
+        rows.pop()
 
     print("\n--- 每 %d 分一段的人数 ---" % BUCKET)
-    for lo, hi, cnt in rows[:last + 1]:
+    for lo, hi, cnt in rows:
         print(f"[{lo:>6}, {hi:>6}]  {cnt:>4} 人  {cnt / total:>6.1%}")
 
 
@@ -137,6 +129,7 @@ def main():
     try:
         tree = build()
     except (json.JSONDecodeError, KeyError, ValueError) as e:
+        # 文件被手改坏（JSON 不合法、字段类型不对等）时，提示后退出，不带半棵树继续跑
         print(f"读取 users.json 失败（{type(e).__name__}: {e}），请检查文件后重试")
         return
 
