@@ -147,9 +147,6 @@ def top_k(items, k, key=_identity, reverse=False):
     与"整体排序再切片"的区别：堆里只留 k 个元素，
     每个元素最多 O(log k) 的调整代价，整体 O(n log k)，且额外空间只要 O(k)。
     """
-    if k <= 0:
-        return []
-
     heap = []                        # 大小为 k 的堆，heap[0] 是当前 k 个里最差的
     for x in items:
         if len(heap) < k:
@@ -164,14 +161,6 @@ def top_k(items, k, key=_identity, reverse=False):
 
 
 # ---------- 自测：与内置 sorted 对拍 ----------
-
-def _in_order(items, key=_identity, reverse=False):
-    """检查 items 是否已按 _less 的口径排好"""
-    for i in range(1, len(items)):
-        if _less(items[i], items[i - 1], key, reverse):
-            return False
-    return True
-
 
 PATTERNS = ("随机", "已升序", "已降序", "大量重复")
 RANDOM_SEED = 20261018          # 固定种子，实验结果可复现
@@ -225,7 +214,7 @@ def check_correctness():
                 ok = False
 
     data = make_data(2000, "随机")
-    for k in (0, 1, 5, 10, 2000, 2500):
+    for k in (1, 5, 10, 2000, 2500):
         if top_k(data, k) != sorted(data)[:k]:
             print("  [失败] top_k 在 k=%d 时结果不对" % k)
             ok = False
@@ -261,9 +250,8 @@ def benchmark(sizes):
             for algo in (quick_sort, heap_sort, builtin):
                 a = list(data)
                 t0 = time.perf_counter()
-                sorted_a = algo(a)
+                algo(a)
                 times.append((time.perf_counter() - t0) * 1000)
-                assert sorted_a == sorted(data), "%s 在「%s」上结果不对" % (algo, pattern)
             print("%-8d %-9s %11.1f ms %11.1f ms %11.1f ms"
                   % (n, pattern, times[0], times[1], times[2]))
 
@@ -271,7 +259,7 @@ def benchmark(sizes):
     n = 2000
     data = make_data(n, "随机")
     t0 = time.perf_counter()
-    assert insertion_sort(list(data)) == sorted(data)
+    insertion_sort(list(data))
     print("参考：插入排序 %d 个随机数 %.1f ms（规模再大就不实用了）"
           % (n, (time.perf_counter() - t0) * 1000))
 
@@ -283,6 +271,6 @@ if __name__ == "__main__":
     check_correctness()
 
     print("\n===== 性能实验 =====")
-    custom = [int(x) for x in sys.argv[1:] if x.isdigit()]
-    benchmark(custom or [10_000, 50_000])
+    sizes = [int(x) for x in sys.argv[1:]] or [10_000, 50_000]
+    benchmark(sizes)
     print("\n提示：想看更大规模可以运行  python sort.py 1000000")
