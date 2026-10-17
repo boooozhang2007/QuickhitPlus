@@ -1,19 +1,21 @@
-"""全服排行榜统计模块
+"""值域线段树 + 基于 users.json 的分数统计脚本
 
-用「值域线段树」维护每个分数有多少玩家，支持：
-    - 我的排名                 O(log V)
-    - 任意分数段有多少人        O(log V)
-    - 第 K 名是谁              O(log V)
+支持任意分数段的人数查询，以及按固定粒度（默认每 1000 分）的分段分布。
 
-选它而不是排序数组 / 前缀和，是因为排行榜的数据会变（破纪录时 high_score 更新）：
-点修改 O(log V)，而前缀和要 O(V) 重算后面全部。
+选线段树而不是排序数组 / 前缀和，是因为分数会变（破纪录时 high_score 更新）：
+点修改 O(log V)，前缀和要 O(V) 重算。值域有界（无限模式得分收敛）才用得起静态数组。
 
-值域是有界的：无限模式每关得分权重按 r = 2^(-0.1) 等比衰减，所以关卡数无限、
-分数级数依然收敛，总分上限约 12263。值域有界才谈得上静态数组（内存 = O(值域
-大小)），不必上动态开点 / 坐标压缩。
+脚本只读 users.json，不依赖 auth 的哈希表。
+用法：python Stats.py
 """
 
+import json
+import os
+
+USER_DATA_FILE = os.path.join(os.path.dirname(__file__), '..', 'users.json')
+
 MAX_SCORE = 16383
+BUCKET = 1000     # 分段统计的粒度
 
 
 class ScoreSegmentTree:
@@ -71,137 +73,98 @@ class ScoreSegmentTree:
             r //= 2
         return total
 
-    def count_greater(self, score):
-        """分数严格大于 score 的玩家数 —— O(log V)"""
-        return self.count_between(score + 1, self.max_score)
-
-    def rank_of(self, score):
-        """分数 score 的名次（并列同名次）= 比我高的人数 + 1 —— O(log V)"""
-        return self.count_greater(score) + 1
-
-    def kth_largest(self, k):
-        """第 k 名的分数（k = 1 即最高分）；越界返回 None —— O(log V)"""
-        if k < 1 or k > self.tree[1]:
-            return None
-        i = 1
-        while i < self.size:
-            right = 2 * i + 1
-            if self.tree[right] >= k:
-                i = right
-            else:
-                k -= self.tree[right]
-                i = 2 * i
-        return i - self.size
-
     def total(self):
         """树里的玩家总数 —— O(1)"""
         return self.tree[1]
 
 
-class Leaderboard:
-    """把 UserManager（auth.py）的账号数据接进值域线段树
+# ---------- 查询菜单 ----------
+def build():
+    """直接读 users.json，返回按最高分建好的线段树"""
+    with open(USER_DATA_FILE, encoding='utf-8') as f:
+        data = json.load(f)
 
-    只用 Account 上已有的两个字段：username 和 high_score。
-    """
+    top_score = max((info.get('high_score', 0) for info in data.values()),
+                    default=0)
+    # 值域至少覆盖现存最高分，旧数据超出 MAX_SCORE 也不会让建树失败
+    tree = ScoreSegmentTree(max(MAX_SCORE, top_score))
+    for info in data.values():
+        tree.add(info.get('high_score', 0))
+    return tree
 
-    def __init__(self, user_manager, max_score=MAX_SCORE):
-        self.um = user_manager
-        self.max_score = max_score
-        self.by_score = {}
-        self.tree = ScoreSegmentTree(max_score)
-        self.rebuild()
 
-    def rebuild(self):
-        """从 UserManager 现有账号整棵重建"""
-        self.by_score = {}
-        self.tree = ScoreSegmentTree(self.max_score)
-        for username, acc in self.um.ht.items():
-            self.tree.add(acc.high_score, 1)
-            self.by_score.setdefault(acc.high_score, []).append(username)
-        return self.tree.total()
+def ask_int(prompt, default=None):
+    raw = input(prompt).strip()
+    if not raw and default is not None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        print("请输入整数")
+        return None
 
-    def add_player(self, username, score):
-        """新用户注册时加入线段树"""
-        self.tree.add(score, 1)
-        self.by_score.setdefault(score, []).append(username)
 
-    def update_player(self, username, old_high, new_high):
-        """某个玩家的最高分变了 —— 两次点修改，O(log V)"""
-        if old_high == new_high:
+def show_buckets(tree):
+    total = tree.total()
+    if total == 0:
+        print("暂无玩家记录")
+        return
+
+    rows = []
+    lo = 0
+    while lo <= tree.max_score:
+        hi = min(lo + BUCKET - 1, tree.max_score)
+        rows.append((lo, hi, tree.count_between(lo, hi)))
+        lo += BUCKET
+
+    # 只列到最后一个有人的分段，否则默认值域会多刷十几行空分段
+    last = max(i for i, (_, _, cnt) in enumerate(rows) if cnt > 0)
+
+    print("\n--- 每 %d 分一段的人数 ---" % BUCKET)
+    for lo, hi, cnt in rows[:last + 1]:
+        print(f"[{lo:>6}, {hi:>6}]  {cnt:>4} 人  {cnt / total:>6.1%}")
+
+
+def show_range(tree):
+    lo = ask_int("下界分数: ")
+    hi = ask_int("上界分数: ")
+    if lo is None or hi is None:
+        return
+    print(f"[{lo}, {hi}] 内有 {tree.count_between(lo, hi)} 名玩家")
+
+
+def main():
+    try:
+        tree = build()
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        print(f"读取 users.json 失败（{type(e).__name__}: {e}），请检查文件后重试")
+        return
+
+    while True:
+        print("\n===== 分数统计（只读 users.json）=====")
+        print("1. 每 %d 分一段的人数" % BUCKET)
+        print("2. 自定义分数段人数")
+        print("r. 重新读取 users.json")
+        print("0. 退出")
+
+        choice = input("请选择: ").strip().lower()
+
+        if choice == "0":
             return
-        self.tree.add(old_high, -1)
-        self.tree.add(new_high, 1)
-
-        names = self.by_score.get(old_high)
-        if names and username in names:
-            names.remove(username)
-            if not names:
-                del self.by_score[old_high]
-        self.by_score.setdefault(new_high, []).append(username)
-
-    def my_rank(self, username):
-        """某个用户的全服名次；查无此人返回 None"""
-        acc = self.um.ht.get(username)
-        if acc is None:
-            return None
-        return self.tree.rank_of(acc.high_score)
-
-    def percentile(self, username):
-        """超过了百分之多少的玩家；查无此人返回 None"""
-        acc = self.um.ht.get(username)
-        if acc is None:
-            return None
-        total = self.tree.total()
-        if total <= 1:
-            return 100.0
-        lower = self.tree.count_between(0, acc.high_score - 1)
-        return lower / (total - 1) * 100.0
-
-    def distribution(self, buckets=8):
-        """把 [0, 全服最高分] 等分成 buckets 段
-
-        返回 [(下界, 上界, 人数), ...]，按分数升序排列。没有玩家时返回 []。
-        """
-        top = self.tree.kth_largest(1)
-        if top is None:
-            return []
-        buckets = max(1, min(buckets, top + 1))
-
-        rows = []
-        for b in range(buckets):
-            lo = b * (top + 1) // buckets
-            hi = (b + 1) * (top + 1) // buckets - 1
-            rows.append((lo, hi, self.tree.count_between(lo, hi)))
-        return rows
-
-    def top_n(self, n=10):
-        """前 n 名，返回 [(分数, [同分的用户名...]), ...]，按分数降序"""
-        result = []
-        k = 1
-        total = self.tree.total()
-        while k <= total and len(result) < n:
-            score = self.tree.kth_largest(k)
-            names = self.by_score.get(score, [])
-            result.append((score, sorted(names)))
-            k += max(len(names), 1)
-        return result
+        elif choice == "1":
+            show_buckets(tree)
+        elif choice == "2":
+            show_range(tree)
+        elif choice == "r":
+            try:
+                tree = build()
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                print(f"重新读取失败（{type(e).__name__}: {e}）")
+                continue
+            print("已重新读取，共 %d 名玩家" % tree.total())
+        else:
+            print("无效选择")
 
 
-BAR_CHAR = '█'
-
-
-def render_histogram(rows, bar_width=36):
-    """把 distribution() 的结果渲染成控制台文本直方图"""
-    if not rows:
-        return []
-    peak = max([c for _, _, c in rows] + [1])
-
-    lines = []
-    for lo, hi, count in rows:
-        label = '%6d' % lo if lo == hi else '%5d-%d' % (lo, hi)
-        filled = int(round(count / peak * bar_width))
-        if count and filled == 0:
-            filled = 1
-        bar = BAR_CHAR * filled
-        lines.append('%s |%-*s %d' % (label, bar_width, bar, count))
-    return lines
+if __name__ == '__main__':
+    main()
