@@ -129,9 +129,16 @@ class NetClient:
             "register_result")
 
     def login(self, username, password):
-        return self.request(
+        r = self.request(
             {"type": "login", "username": username, "password": password},
             "login_result")
+        # login_result 里已经带了登录这一刻的在线人数。
+        # 服务端的 online_count 广播是在 login_result 之后才发的，后台线程
+        # 还没收到就返回了，主菜单若直接读 self.online_count 会显示成 0，
+        # 所以先用回包里的人数兜底。
+        if r is not None and r.get("ok") and "online" in r:
+            self.online_count = r["online"]
+        return r
 
     def online(self):
         return self.request({"type": "online"}, "online_result")

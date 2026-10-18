@@ -30,7 +30,7 @@ def login_or_register(net):
                 continue
             if r["ok"]:
                 print(f"登录成功，欢迎回来，{r['username']}！"
-                      f"（历史最高 {r['high_score']}")
+                      f"（历史最高 {r['high_score']}）")
                 return r["username"]
             print(r["msg"])
 
@@ -169,8 +169,6 @@ def start_battle(net, username, opponent):
     双方都上报后服务器比大小判定胜负并推回来。
     """
     print(f"\n===== 对战开始：你 vs {opponent} =====")
-    print("（双方各打一局无限模式，结束后服务器按得分判定胜负）")
-
     player = infinite_game(account=username)
     score = player.start()
 
