@@ -180,6 +180,12 @@ class Server:
             return
 
         with self.lock:
+            # 同一连接换了账号再登录：先把旧用户名从在线表摘掉，
+            # 否则旧名字会残留成一条假在线记录，把在线人数多算
+            if client.username and client.username != acc.username:
+                if self.online.get(client.username) is client:
+                    del self.online[client.username]
+
             old = self.online.get(acc.username)
             # old is client：同一条连接重登（客户端「返回账号菜单」后会再登一次），
             # 关它就等于关掉正在处理这条请求的 socket
