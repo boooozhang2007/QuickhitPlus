@@ -98,6 +98,7 @@ def show_analyse(net, username):
     print(f"最低分: {r['min_score']}")
     print(f"平均分: {r['avg_score']:.1f}")
     print(f"全服排名: 第 {r['rank']} 名")
+    print(f"最好的一局超过了自己 {r['beaten']} 局（占 {r['beat_ratio']:.1%}）")
 
 
 def do_match(net, username):

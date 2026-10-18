@@ -4,6 +4,8 @@ import hashlib
 import getpass
 from datetime import datetime
 
+from sort import quick_sort, top_k
+
 # users.json 放在项目根目录（src 的上一级）
 USER_DATA_FILE = os.path.join(os.path.dirname(__file__), '..', 'users.json')
 
@@ -212,11 +214,11 @@ class UserManager:
             acc.high_score = score
         self.save()
 
-    # 排行榜（按高分排序，前n名）
+    # 排行榜（按高分取前 n 名）
     def top_players(self, n=10):
+        """用大小为 n 的堆选前 n 名：O(m log n)，不必把 m 个玩家整体排序"""
         players = [acc for _, acc in self.ht.items()]
-        players.sort(key=lambda a: a.high_score, reverse=True)
-        return players[:n]
+        return top_k(players, n, key=lambda a: a.high_score, reverse=True)
 
     # 持久化
     def save(self):
@@ -243,27 +245,33 @@ class UserManager:
 
         scores = [h['score'] for h in acc.history]
         n = len(scores)
-        ordered = sorted(scores)
 
         # 排除边界条件，若为新用户则无记录的情况
         if n == 0:
             return None
 
-        # 二分查找排位
-        left, right = 0, len(ordered)
-        while (left<right):
-            mid = (left+right) // 2
+        ordered = quick_sort(list(scores))   # 自实现快排，把历史成绩排成升序
+
+        # 二分查找：在有序成绩里定位 high_score 的下界。
+        # 这个下标恰好等于"分数低于最高分的历史局数"，
+        # 也就是历史最好的一局超过了自己多少局，取出来给统计界面展示。
+        left, right = 0, n
+        while left < right:
+            mid = (left + right) // 2
             if ordered[mid] < acc.high_score:
-                left = mid+1
+                left = mid + 1
             else:
                 right = mid
+        beaten = left
 
-        #返回总局数、最高分、最低分、平均分、全服排名
+        #返回总局数、最高分、最低分、平均分、全服排名、最好成绩超过的历史局数
         return {'total': n,
                 'max_score': max(scores),
                 'min_score': min(scores),
-                'avg_score': sum(scores)/n,
-                'rank': self.total_ranking(acc.high_score)
+                'avg_score': sum(scores) / n,
+                'rank': self.total_ranking(acc.high_score),
+                'beaten': beaten,
+                'beat_ratio': beaten / n,
                 }
 
 
