@@ -78,8 +78,8 @@ def build():
     # 每个玩家只贡献一个最高分，和排行榜的统计口径一致
     scores = [info.get('high_score', 0) for info in data.values()]
 
-    # 值域至少覆盖现存最高分，旧数据超出 MAX_SCORE 时也能建树；default=0 兜住空文件
-    tree = ScoreSegmentTree(max(MAX_SCORE, max(scores, default=0)))
+    # 得分算法保证最高分不超过 MAX_SCORE，值域可以直接固定
+    tree = ScoreSegmentTree()
     for score in scores:
         tree.add(score)
     return tree
