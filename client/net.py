@@ -148,6 +148,11 @@ class NetClient:
     def cancel_match(self):
         return self.request({"type": "cancel_match"}, "cancel_match_result")
 
+    def submit_battle(self, score):
+        """上报对战胜负局分数；双方都上报后服务器会推送 battle_over"""
+        return self.request({"type": "battle_result", "score": score},
+                            "battle_ack")
+
     def analyse(self):
         return self.request({"type": "analyse"}, "analyse_result")
 

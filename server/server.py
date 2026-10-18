@@ -38,14 +38,43 @@ class Client:
             pass
 
 
+class Battle:
+    """一场匹配对战：记录双方用户名和各自上报的分数
+
+    双方匹配成功后各在本地打完一局无限模式，把分数上报给服务器；
+    两边都上报后由服务器比大小判定胜负。
+    """
+
+    def __init__(self, a, b):
+        self.usernames = (a, b)
+        self.scores = {}          # 用户名 -> 上报的分数
+
+    def report(self, username, score):
+        """记录一次上报，返回双方是否都已上报"""
+        self.scores[username] = score
+        return len(self.scores) == 2
+
+    def opponent_of(self, username):
+        a, b = self.usernames
+        return b if username == a else a
+
+    def winner(self):
+        """返回获胜者用户名；双方分数相同则返回 None（平局）"""
+        a, b = self.usernames
+        if self.scores[a] == self.scores[b]:
+            return None
+        return a if self.scores[a] > self.scores[b] else b
+
+
 class Server:
     def __init__(self):
         self.users = UserManager()   # 复用 client/auth.py 的哈希表 + 账号逻辑
         self.users_lock = threading.Lock()   # HashTable 本身不是线程安全的
 
-        # ---- 下面两块共享状态都由 self.lock 保护 ----
+        # ---- 下面三块共享状态都由 self.lock 保护 ----
         self.online = {}          # 用户名 -> Client，用哈希表做在线表
         self.waiting = deque()    # 等待匹配的 Client，FIFO 队列
+        self.battles = {}         # 用户名 -> Battle，进行中的对战
         self.lock = threading.Lock()
 
     # ---------- 启动 ----------
@@ -82,6 +111,7 @@ class Server:
             "rank": self.do_rank,
             "match": self.do_match,
             "cancel_match": self.do_cancel_match,
+            "battle_result": self.do_battle_result,
             "score": self.do_score,
             "analyse": self.do_analyse,
         }
@@ -107,7 +137,8 @@ class Server:
             self.remove_client(client)
 
     def remove_client(self, client):
-        """客户端断开：从在线表和匹配队列里都摘掉"""
+        """客户端断开：从在线表、匹配队列和对战里都摘掉"""
+        opponent = None
         with self.lock:
             # 只有「当前在线的还是这个连接」才删，避免把顶替上来的新连接误删
             if client.username and self.online.get(client.username) is client:
@@ -115,7 +146,22 @@ class Server:
                 print(f"[INFO] {client.username} 下线，当前在线 {len(self.online)} 人")
             if client in self.waiting:
                 self.waiting.remove(client)
+
+            # 对战中途掉线：结束这场对战并通知对手，别让对手一直干等
+            battle = self.battles.get(client.username) if client.username else None
+            if battle is not None:
+                opp_name = battle.opponent_of(client.username)
+                for u in battle.usernames:
+                    self.battles.pop(u, None)
+                opponent = self.online.get(opp_name)
+
         client.close()
+        if opponent is not None:
+            try:
+                opponent.send({"type": "battle_over", "aborted": True,
+                               "msg": f"对手 {client.username} 已离开，对战结束"})
+            except OSError:
+                pass    # 这个对手也断了，它自己的线程会负责清理
         self.broadcast_online_count()
 
     # ---------- 各请求的处理 ----------
@@ -171,13 +217,76 @@ class Server:
         if pair is None:
             client.send({"type": "match_result", "ok": True,
                          "msg": "已进入匹配队列，等待对手…"})
-        else:
-            a, b = pair
-            # 两边都要通知，各自看到对方的用户名
-            for me, other in ((a, b), (b, a)):
-                me.send({"type": "match_result", "ok": True, "matched": True,
-                         "opponent": other.username,
-                         "msg": f"匹配成功，对手是 {other.username}"})
+            return
+
+        a, b = pair
+        # 配对成功：登记一场对战，等双方各自打完上报成绩后判定胜负
+        with self.lock:
+            battle = Battle(a.username, b.username)
+            self.battles[a.username] = battle
+            self.battles[b.username] = battle
+
+        # 两边都要通知，各自看到对方的用户名
+        for me, other in ((a, b), (b, a)):
+            me.send({"type": "match_result", "ok": True, "matched": True,
+                     "opponent": other.username,
+                     "msg": f"匹配成功，对手是 {other.username}"})
+
+    def do_battle_result(self, client, msg):
+        """接收对战成绩：双方都上报后判定胜负，并把结果推给双方"""
+        if client.username is None:
+            client.send({"type": "error", "msg": "请先登录"})
+            return
+
+        score = int(msg.get("score", 0))
+        results = None
+        targets = None
+
+        with self.lock:
+            battle = self.battles.get(client.username)
+            if battle is None:
+                status = "none"
+            elif not battle.report(client.username, score):
+                status = "waiting"
+            else:
+                status = "done"
+                # 双方都上报了：算出双方视角的结果，并从对战表里摘掉
+                results = {}
+                for u in battle.usernames:
+                    opp = battle.opponent_of(u)
+                    results[u] = {"my_score": battle.scores[u],
+                                  "opp_score": battle.scores[opp],
+                                  "opponent": opp,
+                                  "winner": battle.winner()}
+                targets = [(u, self.online.get(u)) for u in battle.usernames]
+                for u in battle.usernames:
+                    del self.battles[u]
+
+        if status == "none":
+            client.send({"type": "battle_ack", "ok": False,
+                         "msg": "当前没有进行中的对战"})
+            return
+        if status == "waiting":
+            client.send({"type": "battle_ack", "ok": True, "waiting": True,
+                         "msg": "成绩已上报，等待对手完成…"})
+            return
+
+        # 对战成绩也计入各自的历史记录与最高分，和单机模式共享排行榜
+        with self.users_lock:
+            for u in results:
+                self.users.update_score(u, results[u]["my_score"])
+            for u in results:
+                acc = self.users.ht.get(u)
+                results[u]["high_score"] = acc.high_score
+                results[u]["rank"] = self.users.total_ranking(acc.high_score)
+
+        # 先给上报者回执，让它的请求能返回；再把最终结果推给双方
+        client.send({"type": "battle_ack", "ok": True, "waiting": False,
+                     "msg": "成绩已上报"})
+        for u, c in targets:
+            if c is None:      # 可能有一方在等待期间掉线了
+                continue
+            c.send({"type": "battle_over", "msg": "对战结束", **results[u]})
 
     def do_cancel_match(self, client, msg):
         removed = self.dequeue(client)

@@ -6,7 +6,7 @@ from net import NetClient
 from player import Player
 from infinite_game import infinite_game
 
-DEFAULT_HOST = "127.0.0.1"
+DEFAULT_HOST = "35.212.201.97"
 DEFAULT_PORT = 8888
 
 
@@ -116,6 +116,7 @@ def do_match(net, username):
         return
     if r.get("matched"):
         print(r["msg"])
+        start_battle(net, username, r["opponent"])
         return
 
     print(r["msg"])
@@ -143,6 +144,7 @@ def do_match(net, username):
             continue
         if push.get("matched"):
             print(push["msg"])
+            start_battle(net, username, push["opponent"])
             return
         print("收到未知消息:", push)
 
@@ -157,6 +159,67 @@ def cancel_match(net):
         print("取消匹配失败（服务器无响应）")
     else:
         print(r["msg"])
+
+
+# ---------- 对战 ----------
+def start_battle(net, username, opponent):
+    """匹配成功后直接进入对战
+
+    双方各在本地打完一局无限模式，把分数上报给服务器，
+    双方都上报后服务器比大小判定胜负并推回来。
+    """
+    print(f"\n===== 对战开始：你 vs {opponent} =====")
+    print("（双方各打一局无限模式，结束后服务器按得分判定胜负）")
+
+    player = infinite_game(account=username)
+    score = player.start()
+
+    r = net.submit_battle(score)
+    if r is None:
+        print("对战成绩上报失败（服务器无响应）")
+        return
+    if not r.get("ok"):
+        print(r.get("msg", "成绩上报失败"))
+        # 对手可能已经离开，看看有没有中止通知
+        push = net.poll()
+        if push and push.get("type") == "battle_over":
+            print(push.get("msg", ""))
+        return
+
+    print(r["msg"])
+    if r.get("waiting"):
+        print("（等待对手完成，请稍候…）")
+
+    # 等服务器判定：双方都上报后会推送 battle_over
+    while True:
+        push = net.poll(timeout=0.5)
+        if push is None:
+            if not net.connected:
+                print("与服务器断开连接，对战结束")
+                return
+            continue
+        if push.get("type") == "battle_over":
+            if push.get("aborted"):
+                print("\n" + push.get("msg", "对战已中止"))
+            else:
+                show_battle_result(push, username)
+            return
+
+
+def show_battle_result(msg, username):
+    """打印对战结果，判断自己是赢、输还是平局"""
+    print("\n===== 对战结果 ======")
+    print(f"你: {msg['my_score']} 分    {msg['opponent']}: {msg['opp_score']} 分")
+    winner = msg.get("winner")
+    if winner == username:
+        print("恭喜，你赢了！")
+    elif winner is None:
+        print("平局！")
+    else:
+        print(f"{winner} 获胜，你输了。")
+    if "high_score" in msg:
+        print(f"（本局已计入个人记录，历史最高 {msg['high_score']}，"
+              f"全服排名第 {msg['rank']} 名）")
 
 
 # ---------- 主流程 ----------

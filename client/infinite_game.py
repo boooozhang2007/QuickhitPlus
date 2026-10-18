@@ -36,9 +36,9 @@ class infinite_game:
         print("====== 打字游戏开始 ======")
         print("（失败时可撤销重试，最多 %d 次）" % self.MAX_UNDO)
 
+        self.start_time = self._now_millis()   # 只在开局记录一次，统计的是整局总用时
         while(self.is_failed==0):
             game = Game(self)
-            self.start_time = self._now_millis()
             self.level_no += 1
 
             undo_stack.push({'score': self.score, 'level_no': self.level_no})
