@@ -30,7 +30,7 @@ def login_or_register(net):
                 continue
             if r["ok"]:
                 print(f"登录成功，欢迎回来，{r['username']}！"
-                      f"（历史最高 {r['high_score']}，当前在线 {r['online']} 人）")
+                      f"（历史最高 {r['high_score']}")
                 return r["username"]
             print(r["msg"])
 
